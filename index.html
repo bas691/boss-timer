@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="th">
+<title>เวลาเกิดบอส 40 CH</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=IBM+Plex+Sans+Thai:wght@400;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: HUD strip (next target + quick entry) over a grid of channel cards sorted by respawn time */
+:root {
+  --bg: #0e1115; --panel: #161b21; --panel-2: #1c232b; --line: #27303a;
+  --fg: #e7ebf0; --muted: #8a95a3;
+  --accent: #f2b33d; --accent-ink: #1a1405;
+  --ready: #3fd17f; --soon: #ff7b47;
+  --display: "Chakra Petch", "IBM Plex Sans Thai", system-ui, sans-serif;
+  --body: "IBM Plex Sans Thai", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+h1 { font-family: var(--display); font-size: 26px; margin: 0; letter-spacing: .02em; text-wrap: balance; }
+h1 small { color: var(--muted); font-size: 14px; font-weight: 500; margin-left: 8px; }
+.hright { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.clock { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.status { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.status::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+.status.live { color: var(--ready); border-color: var(--ready); }
+.status.live::before { background: var(--ready); }
+.status.warn { color: var(--soon); border-color: var(--soon); }
+.status.warn::before { background: var(--soon); }
+
+.hud { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 760px) { .hud { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-family: var(--display); }
+
+.next { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.next .big { font-family: var(--display); font-weight: 700; font-size: 56px; line-height: 1; color: var(--accent); }
+.next .big span { font-size: 22px; color: var(--muted); margin-right: 4px; }
+.next .t { font-family: var(--mono); font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.next .sub { color: var(--muted); font-size: 14px; }
+.next.ready .big, .next.ready .t { color: var(--ready); }
+.next.soon .t { color: var(--soon); }
+.after { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--muted); }
+.after b { color: var(--fg); font-family: var(--mono); font-weight: 500; }
+
+.quick form { display: flex; gap: 8px; margin-top: 8px; }
+input, button { font: inherit; color: inherit; }
+input[type=text], input[type=number] {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0;
+}
+#q { flex: 1; font-family: var(--mono); font-size: 18px; }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button { cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); padding: 8px 12px; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled, input:disabled { cursor: not-allowed; opacity: .5; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.hint { font-size: 13px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+.hint code { font-family: var(--mono); color: var(--fg); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+.msg { min-height: 1.4em; font-size: 13px; margin-top: 6px; color: var(--accent); }
+
+.tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; font-size: 14px; }
+.tools label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+#cd { width: 76px; font-family: var(--mono); padding: 6px 8px; }
+.tools .sp { flex: 1; }
+.legend { display: flex; gap: 12px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; min-width: 0;
+}
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .rank { font-family: var(--mono); font-size: 12px; color: var(--muted); width: 26px; }
+.card .ch { font-family: var(--display); font-weight: 700; font-size: 22px; }
+.card .ch span { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.card .time { margin-left: auto; text-align: right; }
+.card .rem { font-family: var(--mono); font-weight: 700; font-size: 20px; font-variant-numeric: tabular-nums; }
+.card .at { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+.bar { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+.acts { display: flex; gap: 6px; }
+.acts button { padding: 5px 8px; font-size: 13px; }
+.acts .kill { flex: 1; font-weight: 600; }
+.card.ready { border-left-color: var(--ready); }
+.card.ready .rem { color: var(--ready); }
+.card.ready .bar i { background: var(--ready); }
+.card.soon { border-left-color: var(--soon); }
+.card.soon .rem { color: var(--soon); }
+.card.soon .bar i { background: var(--soon); }
+.card.wait { border-left-color: var(--accent); }
+.card.idle { opacity: .62; }
+.card.idle .rem { color: var(--muted); font-size: 15px; }
+.card.flash { animation: flash .8s ease-out; }
+@keyframes flash { from { background: var(--panel-2); box-shadow: 0 0 0 2px var(--accent); } }
+@media (prefers-reduced-motion: reduce) { .card.flash { animation: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>เวลาเกิดบอส <small>40 CH</small></h1>
+    <div class="hright">
+      <span class="status" id="status">กำลังเชื่อมต่อ…</span>
+      <span class="clock" id="clock">--:--:--</span>
+    </div>
+  </header>
+
+  <div class="hud">
+    <section class="panel">
+      <div class="label">ไปเซิฟต่อไป</div>
+      <div class="next" id="next">
+        <div class="big"><span>CH</span><b id="nextCh">–</b></div>
+        <div>
+          <div class="t" id="nextT">--:--</div>
+          <div class="sub" id="nextSub">ยังไม่มีข้อมูล กดปุ่ม "ตาย" ที่ CH ที่บอสเพิ่งตาย</div>
+        </div>
+      </div>
+      <div class="after" id="after"></div>
+    </section>
+
+    <section class="panel quick">
+      <div class="label">บันทึกบอสตาย (พิมพ์แล้ว Enter)</div>
+      <form id="qf" autocomplete="off">
+        <input type="text" id="q" inputmode="numeric" placeholder="เช่น 39" aria-label="เลข CH">
+        <button class="primary" type="submit" id="qbtn">ตาย</button>
+      </form>
+      <div class="msg" id="msg"></div>
+      <div class="hint">
+        <code>39</code> ตายตอนนี้ · <code>39 -5</code> ตายไปแล้ว 5 นาที · <code>39 14:05</code> ตายตอน 14:05<br>
+        กด <code>/</code> เพื่อกลับมาที่ช่องนี้ · <code>Ctrl+Z</code> ย้อนการกดล่าสุดของคุณ
+      </div>
+    </section>
+  </div>
+
+  <div class="tools">
+    <label for="cd">คูลดาวน์ <input type="number" id="cd" min="1" max="1440" value="30"> นาที</label>
+    <label for="snd"><input type="checkbox" id="snd"> เสียงเตือน (1 นาทีก่อนเกิด และตอนเกิด)</label>
+    <span class="sp"></span>
+    <div class="legend">
+      <span><i style="background:var(--ready)"></i>เกิดแล้ว</span>
+      <span><i style="background:var(--soon)"></i>เหลือ ≤ 3 นาที</span>
+      <span><i style="background:var(--accent)"></i>รอเกิด</span>
+    </div>
+    <button type="button" id="undo" disabled>ย้อนกลับ</button>
+    <button type="button" id="resetArm">ล้างทั้งหมด</button>
+    <button type="button" id="resetYes" class="primary" hidden>ยืนยันล้างของทุกคน</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+// วางค่า config จาก Firebase Console ตรงนี้ (Project settings → Your apps → SDK setup and configuration)
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyC8pyyjiFmgPNYrt2DLDPx-kdLTFSbNp2I",
+  authDomain: "boss-timer-d6d76.firebaseapp.com",
+  databaseURL: "https://boss-timer-d6d76-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "boss-timer-d6d76",
+  storageBucket: "boss-timer-d6d76.firebasestorage.app",
+  messagingSenderId: "865698462191",
+  appId: "1:865698462191:web:66b36a079a9fbf8a5a5e1a"
+};
+</script>
+<script>
+(function () {
+  const N = 40, LOCAL_KEY = 'bossTimer.v1', PREF_KEY = 'bossTimer.prefs', SOON = 3 * 60e3;
+  const $ = (id) => document.getElementById(id);
+
+  // Shared state (from Firebase when configured, localStorage otherwise)
+  let deaths = {}, cd = 30;
+  let fb = null, offset = 0;
+  const nowMs = () => Date.now() + offset;
+  let undoStack = [];
+  let sound = false;
+  try { sound = !!JSON.parse(localStorage.getItem(PREF_KEY) || '{}').sound; } catch (e) {}
+
+  const cdMs = () => cd * 60e3;
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmtDur = (ms) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
+    return h ? `${h}:${pad(m)}:${pad(ss)}` : `${pad(m)}:${pad(ss)}`;
+  };
+  const fmtClock = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+
+  function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = 'status ' + (cls || ''); }
+
+  // ---- storage backends ----
+  function loadLocal() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}');
+      if (s.deaths && !s.sample) deaths = s.deaths;
+      if (s.cd) cd = s.cd;
+    } catch (e) {}
+  }
+  function saveLocal() { try { localStorage.setItem(LOCAL_KEY, JSON.stringify({ cd, deaths })); } catch (e) {} }
+
+  function onWriteError(e) {
+    $('msg').textContent = /permission/i.test((e && (e.code || e.message)) || '')
+      ? 'Firebase ไม่ยอมให้บันทึก ตรวจ Rules ของ Realtime Database'
+      : 'บันทึกไม่สำเร็จ ลองกดอีกครั้ง';
+  }
+
+  function writeDeath(ch, t) {
+    if (t == null) delete deaths[ch]; else deaths[ch] = t;
+    tick();
+    if (!fb) { saveLocal(); return; }
+    fb.ref('bossTimer/deaths/ch' + ch).set(t == null ? null : t).catch(onWriteError);
+  }
+  function writeCd(v) {
+    cd = v; tick();
+    if (!fb) { saveLocal(); return; }
+    fb.ref('bossTimer/cd').set(v).catch(onWriteError);
+  }
+
+  // ---- cards ----
+  const grid = $('grid'), cards = {};
+  for (let ch = 1; ch <= N; ch++) {
+    const el = document.createElement('div');
+    el.className = 'card idle';
+    el.dataset.ch = ch;
+    el.innerHTML =
+      `<div class="top"><span class="rank"></span><span class="ch"><span>CH</span>${ch}</span>` +
+      `<div class="time"><div class="rem"></div><div class="at"></div></div></div>` +
+      `<div class="bar"><i></i></div>` +
+      `<div class="acts"><button class="kill" data-a="kill">ตาย</button>` +
+      `<button data-a="minus" title="ตายเร็วกว่านี้ 1 นาที">−1น</button>` +
+      `<button data-a="plus" title="ตายช้ากว่านี้ 1 นาที">+1น</button>` +
+      `<button data-a="clear" title="ล้าง CH นี้">×</button></div>`;
+    cards[ch] = { el, rank: el.querySelector('.rank'), rem: el.querySelector('.rem'),
+      at: el.querySelector('.at'), bar: el.querySelector('.bar i') };
+    grid.appendChild(el);
+  }
+
+  function setDeath(ch, t) {
+    undoStack.push({ ch, prev: deaths[ch] ?? null });
+    if (undoStack.length > 50) undoStack.shift();
+    delete alerted[ch];
+    writeDeath(ch, t);
+    const c = cards[ch].el; c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash');
+  }
+
+  grid.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const ch = +b.closest('.card').dataset.ch, d = deaths[ch];
+    const a = b.dataset.a;
+    if (a === 'kill') setDeath(ch, nowMs());
+    else if (a === 'clear') setDeath(ch, null);
+    else if (d != null) setDeath(ch, d + (a === 'minus' ? -60e3 : 60e3));
+  });
+
+  // Quick entry: "39", "39 -5" (5 min ago), "39 14:05" (died at 14:05)
+  $('qf').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('q').value.trim(), msg = $('msg');
+    const m = v.match(/^(\d{1,2})(?:\s+(?:-?(\d{1,4})|(\d{1,2})[:.](\d{2})))?$/);
+    const ch = m ? +m[1] : 0;
+    if (!m || ch < 1 || ch > N) { msg.textContent = `พิมพ์เลข CH 1–${N} เช่น 39, 39 -5 หรือ 39 14:05`; return; }
+    let t = nowMs();
+    if (m[2]) t -= +m[2] * 60e3;
+    else if (m[3]) {
+      const d = new Date(t); d.setHours(+m[3], +m[4], 0, 0);
+      if (d.getTime() > t) d.setDate(d.getDate() - 1);
+      t = d.getTime();
+    }
+    setDeath(ch, t);
+    msg.textContent = `บันทึก CH ${ch} ตายเวลา ${fmtClock(t)} · เกิดใหม่ ${fmtClock(t + cdMs())}`;
+    $('q').value = '';
+  });
+
+  $('cd').value = cd;
+  $('cd').addEventListener('change', () => {
+    const v = Math.round(+$('cd').value);
+    if (v >= 1 && v <= 1440 && v !== cd) writeCd(v); else $('cd').value = cd;
+  });
+  $('snd').checked = sound;
+  $('snd').addEventListener('change', () => {
+    sound = $('snd').checked;
+    try { localStorage.setItem(PREF_KEY, JSON.stringify({ sound })); } catch (e) {}
+    if (sound) beep(880, .15);
+  });
+  $('undo').addEventListener('click', doUndo);
+  $('resetArm').addEventListener('click', () => {
+    if ($('resetYes').hidden) { $('resetYes').hidden = false; $('resetArm').textContent = 'ยกเลิก'; }
+    else disarm();
+  });
+  function disarm() { $('resetYes').hidden = true; $('resetArm').textContent = 'ล้างทั้งหมด'; }
+  $('resetYes').addEventListener('click', () => {
+    undoStack = [];
+    Object.keys(deaths).forEach((ch) => writeDeath(+ch, null));
+    disarm();
+  });
+  function doUndo() {
+    const u = undoStack.pop(); if (!u) return;
+    writeDeath(u.ch, u.prev);
+  }
+  document.addEventListener('keydown', (e) => {
+    const typing = e.target.matches('input');
+    if (e.key === '/' && !typing) { e.preventDefault(); $('q').focus(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !(typing && e.target.value)) { e.preventDefault(); doUndo(); }
+  });
+
+  // ---- sound ----
+  let actx = null;
+  function beep(freq, dur) {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.frequency.value = freq; o.type = 'square'; g.gain.value = .06;
+      o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+    } catch (e) {}
+  }
+  const alerted = {};
+  function checkAlerts(ch, rem, respawn) {
+    if (!sound) return;
+    const a = alerted[ch] && alerted[ch].at === respawn ? alerted[ch] : (alerted[ch] = { at: respawn });
+    if (rem <= 60e3 && rem > 0 && !a.soon) { a.soon = true; beep(660, .2); }
+    if (rem <= 0 && rem > -5e3 && !a.up) { a.up = true; beep(990, .15); setTimeout(() => beep(990, .15), 220); }
+  }
+
+  // ---- render ----
+  let lastOrder = '';
+  function tick() {
+    const now = nowMs(), cdm = cdMs();
+    $('clock').textContent = new Date(now).toLocaleTimeString('th-TH', { hour12: false });
+    $('undo').disabled = !undoStack.length;
+
+    const rows = [];
+    for (let ch = 1; ch <= N; ch++) {
+      const d = deaths[ch];
+      rows.push(d == null ? { ch, idle: true } : { ch, d, respawn: d + cdm, rem: d + cdm - now });
+    }
+    // Counting down (soonest first), then already spawned (newest first), then unknown channels by number
+    const grp = (r) => r.idle ? 2 : r.rem > 0 ? 0 : 1;
+    rows.sort((a, b) => grp(a) - grp(b) ||
+      (grp(a) === 0 ? a.respawn - b.respawn : grp(a) === 1 ? b.respawn - a.respawn : 0) || a.ch - b.ch);
+
+    const order = rows.map((r) => r.ch).join(',');
+    if (order !== lastOrder) { rows.forEach((r) => grid.appendChild(cards[r.ch].el)); lastOrder = order; }
+
+    rows.forEach((r, i) => {
+      const c = cards[r.ch];
+      let cls = 'idle';
+      if (r.idle) {
+        c.rank.textContent = ''; c.rem.textContent = 'ไม่มีข้อมูล'; c.at.textContent = ''; c.bar.style.width = '0';
+      } else {
+        cls = r.rem <= 0 ? 'ready' : r.rem <= SOON ? 'soon' : 'wait';
+        c.rank.textContent = '#' + (i + 1);
+        c.rem.textContent = r.rem <= 0 ? 'เกิดแล้ว' : fmtDur(r.rem);
+        c.at.textContent = r.rem <= 0 ? `เกิดเมื่อ ${fmtClock(r.respawn)} (${fmtDur(-r.rem)} ที่แล้ว)` : `ตาย ${fmtClock(r.d)} · เกิด ${fmtClock(r.respawn)}`;
+        c.bar.style.width = Math.min(100, (now - r.d) / cdm * 100) + '%';
+        checkAlerts(r.ch, r.rem, r.respawn);
+      }
+      const want = 'card ' + cls + (c.el.classList.contains('flash') ? ' flash' : '');
+      if (c.el.className !== want) c.el.className = want;
+    });
+
+    const upcoming = rows.filter((r) => !r.idle && r.rem > 0);
+    const spawned = rows.filter((r) => !r.idle && r.rem <= 0);
+    const nx = upcoming[0] || spawned[0], next = $('next');
+    if (!nx) {
+      $('nextCh').textContent = '–'; $('nextT').textContent = '--:--';
+      $('nextSub').textContent = 'ยังไม่มีข้อมูล กดปุ่ม "ตาย" ที่ CH ที่บอสเพิ่งตาย';
+      next.className = 'next'; $('after').innerHTML = '';
+    } else {
+      $('nextCh').textContent = nx.ch;
+      $('nextT').textContent = nx.rem <= 0 ? 'เกิดแล้ว' : fmtDur(nx.rem);
+      $('nextSub').textContent = nx.rem <= 0
+        ? `เกิดตั้งแต่ ${fmtClock(nx.respawn)} (${fmtDur(-nx.rem)} ที่แล้ว)`
+        : `จะเกิดเวลา ${fmtClock(nx.respawn)}`;
+      next.className = 'next ' + (nx.rem <= 0 ? 'ready' : nx.rem <= SOON ? 'soon' : '');
+      const parts = upcoming.filter((r) => r !== nx).slice(0, 5).map((r) =>
+        `<span>ถัดไป CH <b>${r.ch}</b> ${fmtDur(r.rem)}</span>`);
+      const ready = spawned.filter((r) => r !== nx);
+      if (ready.length) parts.push(`<span>เกิดแล้ว: ${ready.map((r) => `CH <b>${r.ch}</b>`).join(', ')}</span>`);
+      $('after').innerHTML = parts.join('<span>·</span>');
+    }
+  }
+
+  // ---- connect ----
+  function goLocal(text) {
+    fb = null; loadLocal(); $('cd').value = cd;
+    setStatus(text, 'warn');
+    tick();
+  }
+
+  function connect() {
+    if (!FIREBASE_CONFIG) { goLocal('ยังไม่ได้ตั้งค่า Firebase · เห็นเฉพาะเครื่องนี้'); return; }
+    if (!window.firebase) { goLocal('โหลด Firebase ไม่ได้ · เห็นเฉพาะเครื่องนี้'); return; }
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fb = firebase.database();
+
+    // Use server time so every device counts down from the same clock
+    fb.ref('.info/serverTimeOffset').on('value', (s) => { offset = +s.val() || 0; tick(); });
+    fb.ref('.info/connected').on('value', (s) => {
+      if (s.val()) setStatus('ออนไลน์ · ทุกคนเห็นเวลาเดียวกัน', 'live');
+      else setStatus('กำลังเชื่อมต่อ…', 'warn');
+    });
+    const onReadErr = () => setStatus('อ่านข้อมูลไม่ได้ · ตรวจ Rules ของ Firebase', 'warn');
+
+    fb.ref('bossTimer/deaths').on('value', (s) => {
+      const v = s.val() || {}, nextDeaths = {};
+      Object.keys(v).forEach((k) => {
+        const m = /^ch(\d{1,2})$/.exec(k), t = v[k];
+        if (m && +m[1] >= 1 && +m[1] <= N && typeof t === 'number' && isFinite(t)) nextDeaths[+m[1]] = t;
+      });
+      deaths = nextDeaths; tick();
+    }, onReadErr);
+
+    fb.ref('bossTimer/cd').on('value', (s) => {
+      const v = s.val();
+      if (typeof v === 'number' && v >= 1 && v <= 1440) {
+        cd = v;
+        if (document.activeElement !== $('cd')) $('cd').value = cd;
+      }
+      tick();
+    }, onReadErr);
+  }
+
+  tick();
+  setInterval(tick, 500);
+  $('q').focus();
+  try { connect(); } catch (e) { goLocal('ตั้งค่า Firebase ไม่ถูกต้อง · เห็นเฉพาะเครื่องนี้'); }
+})();
+</script>
+</html>
