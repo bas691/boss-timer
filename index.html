@@ -84,6 +84,7 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
 .card .rank { font-family: var(--mono); font-size: 12px; color: var(--muted); width: 26px; }
 .card .ch { font-family: var(--display); font-weight: 700; font-size: 22px; }
 .card .ch span { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.card .cdtag { font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 5px; }
 .card .time { margin-left: auto; text-align: right; }
 .card .rem { font-family: var(--mono); font-weight: 700; font-size: 20px; font-variant-numeric: tabular-nums; }
 .card .at { font-size: 12px; color: var(--muted); font-family: var(--mono); }
@@ -143,7 +144,7 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
   </div>
 
   <div class="tools">
-    <label for="cd">คูลดาวน์ <input type="number" id="cd" min="1" max="1440" value="30"> นาที</label>
+    <label for="cd">คูลดาวน์ <input type="number" id="cd" min="1" max="1440" value="30"> นาที (CH10 = 20 นาที)</label>
     <label for="snd"><input type="checkbox" id="snd"> เสียงเตือน (1 นาทีก่อนเกิด และตอนเกิด)</label>
     <span class="sp"></span>
     <div class="legend">
@@ -186,7 +187,9 @@ const FIREBASE_CONFIG = {
   let sound = false;
   try { sound = !!JSON.parse(localStorage.getItem(PREF_KEY) || '{}').sound; } catch (e) {}
 
-  const cdMs = () => cd * 60e3;
+  // Channels with their own cooldown (minutes); all others use the shared setting
+  const CD_OVERRIDE = { 10: 20 };
+  const cdMs = (ch) => (CD_OVERRIDE[ch] || cd) * 60e3;
   const pad = (n) => String(n).padStart(2, '0');
   const fmtDur = (ms) => {
     const s = Math.max(0, Math.round(ms / 1000));
@@ -233,6 +236,7 @@ const FIREBASE_CONFIG = {
     el.dataset.ch = ch;
     el.innerHTML =
       `<div class="top"><span class="rank"></span><span class="ch"><span>CH</span>${ch}</span>` +
+      (CD_OVERRIDE[ch] ? `<span class="cdtag">${CD_OVERRIDE[ch]} นาที</span>` : '') +
       `<div class="time"><div class="rem"></div><div class="at"></div></div></div>` +
       `<div class="bar"><i></i></div>` +
       `<div class="acts"><button class="kill" data-a="kill">ตาย</button>` +
@@ -276,7 +280,7 @@ const FIREBASE_CONFIG = {
       t = d.getTime();
     }
     setDeath(ch, t);
-    msg.textContent = `บันทึก CH ${ch} ตายเวลา ${fmtClock(t)} · เกิดใหม่ ${fmtClock(t + cdMs())}`;
+    msg.textContent = `บันทึก CH ${ch} ตายเวลา ${fmtClock(t)} · เกิดใหม่ ${fmtClock(t + cdMs(ch))}`;
     $('q').value = '';
   });
 
@@ -333,14 +337,15 @@ const FIREBASE_CONFIG = {
   // ---- render ----
   let lastOrder = '';
   function tick() {
-    const now = nowMs(), cdm = cdMs();
+    const now = nowMs();
     $('clock').textContent = new Date(now).toLocaleTimeString('th-TH', { hour12: false });
     $('undo').disabled = !undoStack.length;
 
     const rows = [];
     for (let ch = 1; ch <= N; ch++) {
       const d = deaths[ch];
-      rows.push(d == null ? { ch, idle: true } : { ch, d, respawn: d + cdm, rem: d + cdm - now });
+      const cdm = cdMs(ch);
+      rows.push(d == null ? { ch, idle: true } : { ch, d, cdm, respawn: d + cdm, rem: d + cdm - now });
     }
     // Counting down (soonest first), then already spawned (newest first), then unknown channels by number
     const grp = (r) => r.idle ? 2 : r.rem > 0 ? 0 : 1;
@@ -360,7 +365,7 @@ const FIREBASE_CONFIG = {
         c.rank.textContent = '#' + (i + 1);
         c.rem.textContent = r.rem <= 0 ? 'เกิดแล้ว' : fmtDur(r.rem);
         c.at.textContent = r.rem <= 0 ? `เกิดเมื่อ ${fmtClock(r.respawn)} (${fmtDur(-r.rem)} ที่แล้ว)` : `ตาย ${fmtClock(r.d)} · เกิด ${fmtClock(r.respawn)}`;
-        c.bar.style.width = Math.min(100, (now - r.d) / cdm * 100) + '%';
+        c.bar.style.width = Math.min(100, (now - r.d) / r.cdm * 100) + '%';
         checkAlerts(r.ch, r.rem, r.respawn);
       }
       const want = 'card ' + cls + (c.el.classList.contains('flash') ? ' flash' : '');
