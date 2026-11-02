@@ -225,7 +225,7 @@ const FIREBASE_CONFIG = {
   const base = (id) => id === MAIN ? 'bossTimer' : 'bossTimer/b/' + id;
   const localKey = (id) => id === MAIN ? LOCAL_KEY : LOCAL_KEY + '.' + id;
 
-  // Channels with their own cooldown (minutes) per boss; all others use the boss's setting
+  // Channels with their own cooldown (minutes); bosses without their own list use main's (CH10 = 20 for all)
   const CD_OVERRIDES = { [MAIN]: { 10: 20 } };
   let override = {};
   const cdMs = (ch) => (override[ch] || cd) * 60e3;
@@ -306,7 +306,7 @@ const FIREBASE_CONFIG = {
     subs.forEach((r) => r.off()); subs = [];
     bossId = id; savePrefs();
     try { history.replaceState(null, '', id === MAIN ? location.pathname + location.search : '#boss=' + id); } catch (e) {}
-    override = CD_OVERRIDES[id] || {};
+    override = CD_OVERRIDES[id] || CD_OVERRIDES[MAIN];
     deaths = {}; farm = {}; cd = 30; undoStack = []; lastOrder = '';
     Object.keys(alerted).forEach((k) => delete alerted[k]);
     for (let ch = 1; ch <= N; ch++) {
