@@ -29,6 +29,17 @@ body {
 header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 h1 { font-family: var(--display); font-size: 26px; margin: 0; letter-spacing: .02em; text-wrap: balance; }
 h1 small { color: var(--muted); font-size: 14px; font-weight: 500; margin-left: 8px; }
+.bossbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.bossbar select {
+  font: inherit; font-family: var(--display); font-weight: 700; font-size: 18px; color: var(--accent);
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; max-width: 100%;
+}
+.bossbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bossbar button { font-size: 13px; padding: 6px 10px; }
+.bossbar form { display: flex; gap: 8px; min-width: 0; }
+.bossbar.editing > :not(form) { display: none; }
+#bossName { width: 200px; padding: 6px 10px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .hright { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .clock { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 .status { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
@@ -110,6 +121,19 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
 <div class="wrap">
   <header>
     <h1>เวลาเกิดบอส <small>40 CH</small></h1>
+    <div class="bossbar">
+      <label for="boss" class="vh">เลือกบอส</label>
+      <select id="boss"></select>
+      <button type="button" id="bossAdd">+ เพิ่มบอส</button>
+      <button type="button" id="bossRen">แก้ชื่อ</button>
+      <button type="button" id="bossDel">ลบบอส</button>
+      <button type="button" id="bossDelYes" class="primary" hidden>ยืนยันลบบอสนี้</button>
+      <form id="bossForm" hidden autocomplete="off">
+        <input type="text" id="bossName" maxlength="40" aria-label="ชื่อบอส" placeholder="ชื่อบอส">
+        <button type="submit" class="primary">บันทึก</button>
+        <button type="button" id="bossCancel">ยกเลิก</button>
+      </form>
+    </div>
     <div class="hright">
       <span class="status" id="status">กำลังเชื่อมต่อ…</span>
       <span class="clock" id="clock">--:--:--</span>
@@ -144,7 +168,7 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
   </div>
 
   <div class="tools">
-    <label for="cd">คูลดาวน์ <input type="number" id="cd" min="1" max="1440" value="30"> นาที (CH10 = 20 นาที)</label>
+    <label for="cd">คูลดาวน์ <input type="number" id="cd" min="1" max="1440" value="30"> นาที <span id="cdNote"></span></label>
     <label for="snd"><input type="checkbox" id="snd"> เสียงเตือน (1 นาทีก่อนเกิด และตอนเกิด)</label>
     <span class="sp"></span>
     <div class="legend">
@@ -184,12 +208,23 @@ const FIREBASE_CONFIG = {
   let fb = null, offset = 0;
   const nowMs = () => Date.now() + offset;
   let undoStack = [];
-  let sound = false;
-  try { sound = !!JSON.parse(localStorage.getItem(PREF_KEY) || '{}').sound; } catch (e) {}
+  let sound = false, prefBoss = null;
+  try {
+    const p = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+    sound = !!p.sound; prefBoss = p.boss || null;
+  } catch (e) {}
+  const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify({ sound, boss: bossId })); } catch (e) {} };
 
-  // Channels with their own cooldown (minutes); all others use the shared setting
-  const CD_OVERRIDE = { 10: 20 };
-  const cdMs = (ch) => (CD_OVERRIDE[ch] || cd) * 60e3;
+  // Bosses: "main" keeps the original data paths so existing times carry over
+  const MAIN = 'main', BOSSES_KEY = 'bossTimer.bosses';
+  let bosses = { [MAIN]: { name: 'บอส 1' } }, bossId = MAIN;
+  const base = (id) => id === MAIN ? 'bossTimer' : 'bossTimer/b/' + id;
+  const localKey = (id) => id === MAIN ? LOCAL_KEY : LOCAL_KEY + '.' + id;
+
+  // Channels with their own cooldown (minutes) per boss; all others use the boss's setting
+  const CD_OVERRIDES = { [MAIN]: { 10: 20 } };
+  let override = {};
+  const cdMs = (ch) => (override[ch] || cd) * 60e3;
   const pad = (n) => String(n).padStart(2, '0');
   const fmtDur = (ms) => {
     const s = Math.max(0, Math.round(ms / 1000));
@@ -203,13 +238,18 @@ const FIREBASE_CONFIG = {
   // ---- storage backends ----
   function loadLocal() {
     try {
-      const s = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}');
+      const s = JSON.parse(localStorage.getItem(localKey(bossId)) || '{}');
       if (s.deaths && !s.sample) deaths = s.deaths;
       if (s.cd) cd = s.cd;
     } catch (e) {}
   }
-  function saveLocal() { try { localStorage.setItem(LOCAL_KEY, JSON.stringify({ cd, deaths })); } catch (e) {} }
+  function saveLocal() { try { localStorage.setItem(localKey(bossId), JSON.stringify({ cd, deaths })); } catch (e) {} }
+  function loadLocalBosses() {
+    try { setBosses(JSON.parse(localStorage.getItem(BOSSES_KEY) || '{}')); } catch (e) {}
+  }
+  function saveLocalBosses() { try { localStorage.setItem(BOSSES_KEY, JSON.stringify(bosses)); } catch (e) {} }
 
+  let pendingAdd = null;
   function onWriteError(e) {
     $('msg').textContent = /permission/i.test((e && (e.code || e.message)) || '')
       ? 'Firebase ไม่ยอมให้บันทึก ตรวจ Rules ของ Realtime Database'
@@ -220,13 +260,106 @@ const FIREBASE_CONFIG = {
     if (t == null) delete deaths[ch]; else deaths[ch] = t;
     tick();
     if (!fb) { saveLocal(); return; }
-    fb.ref('bossTimer/deaths/ch' + ch).set(t == null ? null : t).catch(onWriteError);
+    fb.ref(base(bossId) + '/deaths/ch' + ch).set(t == null ? null : t).catch(onWriteError);
   }
   function writeCd(v) {
     cd = v; tick();
     if (!fb) { saveLocal(); return; }
-    fb.ref('bossTimer/cd').set(v).catch(onWriteError);
+    fb.ref(base(bossId) + '/cd').set(v).catch(onWriteError);
   }
+
+  // ---- bosses ----
+  function setBosses(v) {
+    const next = { [MAIN]: { name: 'บอส 1' } };
+    Object.keys(v || {}).forEach((id) => {
+      const n = v[id] && v[id].name;
+      if (/^[a-z0-9]{1,20}$/.test(id) && typeof n === 'string' && n.trim()) next[id] = { name: n.trim().slice(0, 40) };
+    });
+    bosses = next;
+    renderBossSelect();
+  }
+  function renderBossSelect() {
+    const sel = $('boss');
+    sel.textContent = '';
+    // Main first, then in the order they were added (ids start with a base-36 timestamp)
+    const ids = Object.keys(bosses).sort((a, b) => (a === MAIN ? -1 : b === MAIN ? 1 : a < b ? -1 : 1));
+    ids.forEach((id) => sel.appendChild(new Option(bosses[id].name, id)));
+    sel.value = bossId;
+    $('bossDel').disabled = bossId === MAIN;
+  }
+
+  let subs = [];
+  function selectBoss(id) {
+    if (!bosses[id]) id = MAIN;
+    subs.forEach((r) => r.off()); subs = [];
+    bossId = id; savePrefs();
+    try { history.replaceState(null, '', id === MAIN ? location.pathname + location.search : '#boss=' + id); } catch (e) {}
+    override = CD_OVERRIDES[id] || {};
+    deaths = {}; cd = 30; undoStack = []; lastOrder = '';
+    Object.keys(alerted).forEach((k) => delete alerted[k]);
+    for (let ch = 1; ch <= N; ch++) {
+      const tag = cards[ch].tag;
+      tag.hidden = !override[ch]; tag.textContent = override[ch] ? override[ch] + ' นาที' : '';
+    }
+    $('cdNote').textContent = Object.keys(override).map((ch) => `(CH${ch} = ${override[ch]} นาที)`).join(' ');
+    document.title = 'เวลาเกิด ' + bosses[id].name;
+    renderBossSelect(); disarm(); disarmBossDel(); closeName();
+    $('msg').textContent = '';
+    if (fb) listenBoss(); else loadLocal();
+    $('cd').value = cd;
+    tick();
+  }
+
+  $('boss').addEventListener('change', () => selectBoss($('boss').value));
+  // Inline name field for adding / renaming (no browser popups, which some browsers block)
+  let nameMode = null;
+  function openName(mode) {
+    nameMode = mode; disarmBossDel();
+    $('bossName').value = mode === 'ren' ? bosses[bossId].name : '';
+    $('bossForm').hidden = false; $('boss').parentNode.classList.add('editing');
+    $('bossName').focus(); $('bossName').select();
+  }
+  function closeName() {
+    nameMode = null;
+    $('bossForm').hidden = true; $('boss').parentNode.classList.remove('editing');
+  }
+  $('bossAdd').addEventListener('click', () => openName('add'));
+  $('bossRen').addEventListener('click', () => openName('ren'));
+  $('bossCancel').addEventListener('click', closeName);
+  $('bossName').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeName(); });
+  $('bossForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('bossName').value.trim().slice(0, 40);
+    if (!name) { $('bossName').focus(); return; }
+    const mode = nameMode; closeName();
+    if (mode === 'add') {
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      bosses[id] = { name };
+      if (fb) {
+        pendingAdd = id;
+        fb.ref('bossTimer/bosses/' + id).set({ name }).catch(onWriteError).then(() => { if (pendingAdd === id) pendingAdd = null; });
+      } else saveLocalBosses();
+      selectBoss(id);
+    } else {
+      bosses[bossId] = { name };
+      if (fb) fb.ref('bossTimer/bosses/' + bossId).set({ name }).catch(onWriteError); else saveLocalBosses();
+      renderBossSelect(); document.title = 'เวลาเกิด ' + name;
+    }
+  });
+
+  function disarmBossDel() { $('bossDelYes').hidden = true; $('bossDel').textContent = 'ลบบอส'; }
+  $('bossDel').addEventListener('click', () => {
+    if (bossId === MAIN) return;
+    if ($('bossDelYes').hidden) { $('bossDelYes').hidden = false; $('bossDel').textContent = 'ยกเลิก'; }
+    else disarmBossDel();
+  });
+  $('bossDelYes').addEventListener('click', () => {
+    const id = bossId; disarmBossDel(); if (id === MAIN) return;
+    delete bosses[id];
+    if (fb) fb.ref('bossTimer').update({ ['bosses/' + id]: null, ['b/' + id]: null }).catch(onWriteError);
+    else { saveLocalBosses(); try { localStorage.removeItem(localKey(id)); } catch (e) {} }
+    selectBoss(MAIN);
+  });
 
   // ---- cards ----
   const grid = $('grid'), cards = {};
@@ -236,7 +369,7 @@ const FIREBASE_CONFIG = {
     el.dataset.ch = ch;
     el.innerHTML =
       `<div class="top"><span class="rank"></span><span class="ch"><span>CH</span>${ch}</span>` +
-      (CD_OVERRIDE[ch] ? `<span class="cdtag">${CD_OVERRIDE[ch]} นาที</span>` : '') +
+      `<span class="cdtag" hidden></span>` +
       `<div class="time"><div class="rem"></div><div class="at"></div></div></div>` +
       `<div class="bar"><i></i></div>` +
       `<div class="acts"><button class="kill" data-a="kill">ตาย</button>` +
@@ -244,7 +377,7 @@ const FIREBASE_CONFIG = {
       `<button data-a="plus" title="ตายช้ากว่านี้ 1 นาที">+1น</button>` +
       `<button data-a="clear" title="ล้าง CH นี้">×</button></div>`;
     cards[ch] = { el, rank: el.querySelector('.rank'), rem: el.querySelector('.rem'),
-      at: el.querySelector('.at'), bar: el.querySelector('.bar i') };
+      at: el.querySelector('.at'), bar: el.querySelector('.bar i'), tag: el.querySelector('.cdtag') };
     grid.appendChild(el);
   }
 
@@ -292,7 +425,7 @@ const FIREBASE_CONFIG = {
   $('snd').checked = sound;
   $('snd').addEventListener('change', () => {
     sound = $('snd').checked;
-    try { localStorage.setItem(PREF_KEY, JSON.stringify({ sound })); } catch (e) {}
+    savePrefs();
     if (sound) beep(880, .15);
   });
   $('undo').addEventListener('click', doUndo);
@@ -395,10 +528,35 @@ const FIREBASE_CONFIG = {
   }
 
   // ---- connect ----
+  const hashBoss = () => { const m = /^#boss=([a-z0-9]{1,20})$/.exec(location.hash); return m && m[1]; };
+
   function goLocal(text) {
-    fb = null; loadLocal(); $('cd').value = cd;
+    subs.forEach((r) => r.off()); subs = [];
+    fb = null; loadLocalBosses();
     setStatus(text, 'warn');
-    tick();
+    selectBoss(hashBoss() || prefBoss || MAIN);
+  }
+
+  function onReadErr() { setStatus('อ่านข้อมูลไม่ได้ · ตรวจ Rules ของ Firebase', 'warn'); }
+
+  function listenBoss() {
+    const dRef = fb.ref(base(bossId) + '/deaths'), cRef = fb.ref(base(bossId) + '/cd');
+    subs = [dRef, cRef];
+    dRef.on('value', (s) => {
+      const v = s.val() || {}, nextDeaths = {};
+      Object.keys(v).forEach((k) => {
+        const m = /^ch(\d{1,2})$/.exec(k), t = v[k];
+        if (m && +m[1] >= 1 && +m[1] <= N && typeof t === 'number' && isFinite(t)) nextDeaths[+m[1]] = t;
+      });
+      deaths = nextDeaths; tick();
+    }, onReadErr);
+
+    cRef.on('value', (s) => {
+      const v = s.val();
+      cd = typeof v === 'number' && v >= 1 && v <= 1440 ? v : 30;
+      if (document.activeElement !== $('cd')) $('cd').value = cd;
+      tick();
+    }, onReadErr);
   }
 
   function connect() {
@@ -413,27 +571,25 @@ const FIREBASE_CONFIG = {
       if (s.val()) setStatus('ออนไลน์ · ทุกคนเห็นเวลาเดียวกัน', 'live');
       else setStatus('กำลังเชื่อมต่อ…', 'warn');
     });
-    const onReadErr = () => setStatus('อ่านข้อมูลไม่ได้ · ตรวจ Rules ของ Firebase', 'warn');
 
-    fb.ref('bossTimer/deaths').on('value', (s) => {
-      const v = s.val() || {}, nextDeaths = {};
-      Object.keys(v).forEach((k) => {
-        const m = /^ch(\d{1,2})$/.exec(k), t = v[k];
-        if (m && +m[1] >= 1 && +m[1] <= N && typeof t === 'number' && isFinite(t)) nextDeaths[+m[1]] = t;
-      });
-      deaths = nextDeaths; tick();
-    }, onReadErr);
-
-    fb.ref('bossTimer/cd').on('value', (s) => {
-      const v = s.val();
-      if (typeof v === 'number' && v >= 1 && v <= 1440) {
-        cd = v;
-        if (document.activeElement !== $('cd')) $('cd').value = cd;
+    // Pick the boss from the link (#boss=…) or the last one used, once the boss list has arrived
+    let first = true;
+    fb.ref('bossTimer/bosses').on('value', (s) => {
+      setBosses(s.val());
+      if (first) { first = false; selectBoss(hashBoss() || prefBoss || MAIN); }
+      else if (!bosses[bossId]) {
+        // A rejected add also removes the boss locally; its write error explains why, so don't say "deleted"
+        const rejected = pendingAdd === bossId;
+        selectBoss(MAIN);
+        if (!rejected) $('msg').textContent = 'บอสที่ดูอยู่ถูกลบแล้ว';
       }
-      tick();
+      else document.title = 'เวลาเกิด ' + bosses[bossId].name;
     }, onReadErr);
   }
 
+  window.addEventListener('hashchange', () => { const h = hashBoss(); if (h && h !== bossId) selectBoss(h); });
+
+  renderBossSelect();
   tick();
   setInterval(tick, 500);
   $('q').focus();
