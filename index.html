@@ -101,9 +101,13 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
 .card .at { font-size: 12px; color: var(--muted); font-family: var(--mono); }
 .bar { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
 .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
-.acts { display: flex; gap: 6px; }
+.acts { display: flex; gap: 6px; align-items: flex-start; }
 .acts button { padding: 5px 8px; font-size: 13px; }
-.acts .kill { flex: 1; font-weight: 600; }
+.acts .killcol { flex: 1; display: grid; gap: 4px; min-width: 0; }
+.acts .kill { font-weight: 600; }
+.farm { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; padding-left: 2px; }
+.farm input { margin: 0; accent-color: var(--soon); cursor: pointer; }
+.card.farmed .farm { color: var(--soon); font-weight: 600; }
 .card.ready { border-left-color: var(--ready); }
 .card.ready .rem { color: var(--ready); }
 .card.ready .bar i { background: var(--ready); }
@@ -204,7 +208,7 @@ const FIREBASE_CONFIG = {
   const $ = (id) => document.getElementById(id);
 
   // Shared state (from Firebase when configured, localStorage otherwise)
-  let deaths = {}, cd = 30;
+  let deaths = {}, farm = {}, cd = 30;
   let fb = null, offset = 0;
   const nowMs = () => Date.now() + offset;
   let undoStack = [];
@@ -240,10 +244,11 @@ const FIREBASE_CONFIG = {
     try {
       const s = JSON.parse(localStorage.getItem(localKey(bossId)) || '{}');
       if (s.deaths && !s.sample) deaths = s.deaths;
+      if (s.farm) farm = s.farm;
       if (s.cd) cd = s.cd;
     } catch (e) {}
   }
-  function saveLocal() { try { localStorage.setItem(localKey(bossId), JSON.stringify({ cd, deaths })); } catch (e) {} }
+  function saveLocal() { try { localStorage.setItem(localKey(bossId), JSON.stringify({ cd, deaths, farm })); } catch (e) {} }
   function loadLocalBosses() {
     try { setBosses(JSON.parse(localStorage.getItem(BOSSES_KEY) || '{}')); } catch (e) {}
   }
@@ -261,6 +266,13 @@ const FIREBASE_CONFIG = {
     tick();
     if (!fb) { saveLocal(); return; }
     fb.ref(base(bossId) + '/deaths/ch' + ch).set(t == null ? null : t).catch(onWriteError);
+  }
+  // "Someone is farming this channel" flag, shared like the death times
+  function writeFarm(ch, on) {
+    if (on) farm[ch] = true; else delete farm[ch];
+    tick();
+    if (!fb) { saveLocal(); return; }
+    fb.ref(base(bossId) + '/farm/ch' + ch).set(on ? true : null).catch(onWriteError);
   }
   function writeCd(v) {
     cd = v; tick();
@@ -295,7 +307,7 @@ const FIREBASE_CONFIG = {
     bossId = id; savePrefs();
     try { history.replaceState(null, '', id === MAIN ? location.pathname + location.search : '#boss=' + id); } catch (e) {}
     override = CD_OVERRIDES[id] || {};
-    deaths = {}; cd = 30; undoStack = []; lastOrder = '';
+    deaths = {}; farm = {}; cd = 30; undoStack = []; lastOrder = '';
     Object.keys(alerted).forEach((k) => delete alerted[k]);
     for (let ch = 1; ch <= N; ch++) {
       const tag = cards[ch].tag;
@@ -372,12 +384,14 @@ const FIREBASE_CONFIG = {
       `<span class="cdtag" hidden></span>` +
       `<div class="time"><div class="rem"></div><div class="at"></div></div></div>` +
       `<div class="bar"><i></i></div>` +
-      `<div class="acts"><button class="kill" data-a="kill">ตาย</button>` +
+      `<div class="acts"><div class="killcol"><button class="kill" data-a="kill">ตาย</button>` +
+      `<label class="farm"><input type="checkbox"> มีคนฟาร์ม</label></div>` +
       `<button data-a="minus" title="ตายเร็วกว่านี้ 1 นาที">−1น</button>` +
       `<button data-a="plus" title="ตายช้ากว่านี้ 1 นาที">+1น</button>` +
       `<button data-a="clear" title="ล้าง CH นี้">×</button></div>`;
     cards[ch] = { el, rank: el.querySelector('.rank'), rem: el.querySelector('.rem'),
-      at: el.querySelector('.at'), bar: el.querySelector('.bar i'), tag: el.querySelector('.cdtag') };
+      at: el.querySelector('.at'), bar: el.querySelector('.bar i'), tag: el.querySelector('.cdtag'),
+      farm: el.querySelector('.farm input') };
     grid.appendChild(el);
   }
 
@@ -396,6 +410,10 @@ const FIREBASE_CONFIG = {
     if (a === 'kill') setDeath(ch, nowMs());
     else if (a === 'clear') setDeath(ch, null);
     else if (d != null) setDeath(ch, d + (a === 'minus' ? -60e3 : 60e3));
+  });
+  grid.addEventListener('change', (e) => {
+    if (!e.target.closest('.farm')) return;
+    writeFarm(+e.target.closest('.card').dataset.ch, e.target.checked);
   });
 
   // Quick entry: "39", "39 -5" (5 min ago), "39 14:05" (died at 14:05)
@@ -437,6 +455,7 @@ const FIREBASE_CONFIG = {
   $('resetYes').addEventListener('click', () => {
     undoStack = [];
     Object.keys(deaths).forEach((ch) => writeDeath(+ch, null));
+    Object.keys(farm).forEach((ch) => writeFarm(+ch, false));
     disarm();
   });
   function doUndo() {
@@ -501,7 +520,8 @@ const FIREBASE_CONFIG = {
         c.bar.style.width = Math.min(100, (now - r.d) / r.cdm * 100) + '%';
         checkAlerts(r.ch, r.rem, r.respawn);
       }
-      const want = 'card ' + cls + (c.el.classList.contains('flash') ? ' flash' : '');
+      if (c.farm.checked !== !!farm[r.ch]) c.farm.checked = !!farm[r.ch];
+      const want = 'card ' + cls + (farm[r.ch] ? ' farmed' : '') + (c.el.classList.contains('flash') ? ' flash' : '');
       if (c.el.className !== want) c.el.className = want;
     });
 
@@ -515,9 +535,9 @@ const FIREBASE_CONFIG = {
     } else {
       $('nextCh').textContent = nx.ch;
       $('nextT').textContent = nx.rem <= 0 ? 'เกิดแล้ว' : fmtDur(nx.rem);
-      $('nextSub').textContent = nx.rem <= 0
+      $('nextSub').textContent = (nx.rem <= 0
         ? `เกิดตั้งแต่ ${fmtClock(nx.respawn)} (${fmtDur(-nx.rem)} ที่แล้ว)`
-        : `จะเกิดเวลา ${fmtClock(nx.respawn)}`;
+        : `จะเกิดเวลา ${fmtClock(nx.respawn)}`) + (farm[nx.ch] ? ' · มีคนฟาร์ม' : '');
       next.className = 'next ' + (nx.rem <= 0 ? 'ready' : nx.rem <= SOON ? 'soon' : '');
       const parts = upcoming.filter((r) => r !== nx).slice(0, 5).map((r) =>
         `<span>ถัดไป CH <b>${r.ch}</b> ${fmtDur(r.rem)}</span>`);
@@ -541,7 +561,16 @@ const FIREBASE_CONFIG = {
 
   function listenBoss() {
     const dRef = fb.ref(base(bossId) + '/deaths'), cRef = fb.ref(base(bossId) + '/cd');
-    subs = [dRef, cRef];
+    const fRef = fb.ref(base(bossId) + '/farm');
+    subs = [dRef, cRef, fRef];
+    fRef.on('value', (s) => {
+      const v = s.val() || {}, next = {};
+      Object.keys(v).forEach((k) => {
+        const m = /^ch(\d{1,2})$/.exec(k);
+        if (m && +m[1] >= 1 && +m[1] <= N && v[k] === true) next[+m[1]] = true;
+      });
+      farm = next; tick();
+    }, onReadErr);
     dRef.on('value', (s) => {
       const v = s.val() || {}, nextDeaths = {};
       Object.keys(v).forEach((k) => {
